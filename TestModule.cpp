@@ -6,9 +6,9 @@
 #include <iostream>
 #include <mutex>
 #include <queue>
+#include <unordered_set>
 
 export module TestModule;
-import DataStructures;
 
 export using namespace std::chrono_literals;
 
@@ -16,6 +16,45 @@ export struct TimedTaskInfo
 {
     std::function<void()> callback = nullptr;
     bool forceSynchronous = true; // true => run on main thread; false => run on parallel thread
+};
+
+
+class Constants16bit
+{
+public:
+    static constexpr uint16_t Invalid  = 0x8000U; // 10000000 00000000
+};
+
+template<typename T>
+requires std::is_default_constructible_v<T>
+struct LinkedListNode // not exported
+{
+    T element {};
+    LinkedListNode<T>& operator=(const T& other) { element = other; return *this; }
+};
+
+template<typename T, uint16_t Size>
+class LinkedListArray
+{
+    static_assert(Size < Constants16bit::Invalid);
+public:
+    LinkedListArray();
+    bool Insert(const T& elem);
+
+    void ForEach(std::function<bool(const T&)> iterate); // iterate returns 'true' is element should be removed
+    void PostIterate(); // cleanup any elements marked as so
+
+private:
+    LinkedListNode<T> mList[Size];
+    std::unordered_set<uint16_t> mAllocated;
+
+    // free-list implemented as a stack (probably better cache performance)
+    uint16_t mFreeList[Size];
+    uint16_t mFreeCount;
+
+    // elements marked for removal
+    uint16_t mRemovals[Size];
+    uint16_t mRemovalCount;
 };
 
 
@@ -27,9 +66,7 @@ public:
     void RunTasks();
     void Notify() {}
     void Terminate();
-
-    template<class Rep, class Period>
-    void AddTimedTask(std::chrono::duration<Rep, Period> duration, const TimedTaskInfo& taskInfo);
+    void RunTask(const TimedTaskInfo& taskInfo);
 
 private:
     void Runner();
@@ -47,17 +84,63 @@ public:
     TaskContainer(uint16_t maxSize = 64);
     ~TaskContainer();
     void ProcessTasks();
-
-    template<class Rep, class Period>
-    void AddTimedTask(std::chrono::duration<Rep, Period> duration, const TimedTaskInfo& taskInfo);
+    void AddTimedTask(std::chrono::seconds duration, const TimedTaskInfo& taskInfo);
 
 private:
+    bool ForEachTask(const TimedTaskInfo& taskInfo);
     ParallelTaskRunner* mTaskRunner = nullptr;
     LinkedListArray<TimedTaskInfo, 64>* mTaskList; // space for 64 tasks at any given time
 };
 
 
 module :private;
+
+
+template <typename T, uint16_t Size>
+LinkedListArray<T, Size>::LinkedListArray()
+{
+    for (uint16_t i = 0; i < Size; i++)
+    {
+        mFreeList[i] = i;
+        mRemovals[i] = Constants16bit::Invalid;
+    }
+    mFreeCount = Size;
+    mRemovalCount = 0U;
+}
+
+template <typename T, uint16_t Size>
+bool LinkedListArray<T, Size>::Insert(const T& elem)
+{
+    if (mFreeCount == 0) { return false; }
+    const uint16_t index = mFreeList[--mFreeCount];
+    mList[index] = elem; // insert at back
+    mAllocated.insert(index);
+    return true;
+}
+
+template <typename T, uint16_t Size>
+void LinkedListArray<T, Size>::ForEach(std::function<bool(const T&)> iterate)
+{
+    for (const uint16_t index : mAllocated)
+    {
+        const T& elem = mList[index].element; 
+        if (iterate(elem))
+        {
+            mRemovals[mRemovalCount++] = index;
+        }
+    }
+}
+
+template <typename T, uint16_t Size>
+void LinkedListArray<T, Size>::PostIterate()
+{
+    for (uint16_t i = 0; i < mRemovalCount; i++)
+    {
+        mAllocated.erase(mRemovals[i]);
+        mFreeList[mFreeCount++] = mRemovals[i];
+    }
+    mRemovalCount = 0U;
+}
 
 
 ParallelTaskRunner::ParallelTaskRunner()
@@ -78,9 +161,9 @@ void ParallelTaskRunner::Terminate()
 {
 }
 
-template <class Rep, class Period>
-void ParallelTaskRunner::AddTimedTask(std::chrono::duration<Rep, Period> duration, const TimedTaskInfo& taskInfo)
+void ParallelTaskRunner::RunTask(const TimedTaskInfo& taskInfo)
 {
+    // TODO: Probably something with condition variable
 }
 
 void ParallelTaskRunner::Runner()
@@ -114,13 +197,29 @@ TaskContainer::~TaskContainer()
 
 void TaskContainer::ProcessTasks()
 {
-    
+    mTaskList->ForEach(std::bind(&TaskContainer::ForEachTask, this, std::placeholders::_1)); // TODO: Will need std::bind?
+    mTaskList->PostIterate();
 }
 
+bool TaskContainer::ForEachTask(const TimedTaskInfo& taskInfo)
+{
+    bool elapsed = true; // TODO: Check if timespan has elapsed
+    if (elapsed)
+    {
+        if (taskInfo.forceSynchronous)
+        {
+            taskInfo.callback();
+        }
+        else
+        {
+            // delegate to Task Runner
+            mTaskRunner->RunTask(taskInfo);
+        }
+    }
+    return elapsed;
+}
 
-
-template <class Rep, class Period>
-void TaskContainer::AddTimedTask(std::chrono::duration<Rep, Period> duration, const TimedTaskInfo& taskInfo)
+void TaskContainer::AddTimedTask(std::chrono::seconds duration, const TimedTaskInfo& taskInfo)
 {
     if (taskInfo.callback == nullptr)
     {
@@ -128,13 +227,5 @@ void TaskContainer::AddTimedTask(std::chrono::duration<Rep, Period> duration, co
         return;
     }
 
-    if (!taskInfo.forceSynchronous)
-    {
-        // delegate to Task Runner
-        mTaskRunner->AddTimedTask(duration, taskInfo);
-    }
-    else
-    {
-        
-    }
+    mTaskList->Insert(taskInfo); // TODO: Should insert together with duration!
 }
