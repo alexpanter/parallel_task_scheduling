@@ -178,14 +178,10 @@ void ParallelTaskRunner::Terminate()
 
 void ParallelTaskRunner::RunTask(const TimedTaskInfo& taskInfo)
 {
-    // TODO: Probably something with condition variable
-
-    // NOTE: Very interesting scenario is having a thread pool, and then find an available thread!
-    // This could be done by adding to a data structure (NOT a queue) and signal a(ny) thread
-
-    while (!mMutex.try_lock()) {} // TODO: Probably not the best, but should be ready momentarily!
+    std::unique_lock lk(mMutex);
+    while (!lk.try_lock()) {} // TODO: Probably not the best, but should be ready momentarily!
     mQueue.push(taskInfo); // we must copy it
-    mMutex.unlock();
+    lk.unlock();
     mCV.notify_one();
 }
 
@@ -195,26 +191,26 @@ void ParallelTaskRunner::Runner()
 
     while (mRunning.load())
     {
+        std::unique_lock lk(mMutex);
         // 0) check if wakeup was spurious
 
         // 1) check mutex state and possibly wait
-        while (!mMutex.try_lock())
+        if (!lk.try_lock())
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50)); // something...
+            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // something...
+            continue;
         }
 
-        // 2) dequeue and execute
+        // 2) dequeue, relinquish lock, then execute
         if (!mQueue.empty())
         {
             TimedTaskInfo timedTask = mQueue.front();
             mQueue.pop();
-            mMutex.unlock();
-
+            lk.release();
             timedTask.callback();
         }
 
         // 3) go to sleep on CV
-        std::unique_lock lk(mMutex); // TODO: This won't work! I probably need several mutexes! (muticies? :))
         mCV.wait(lk);
     }
 }

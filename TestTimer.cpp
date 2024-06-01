@@ -23,15 +23,15 @@ int main(int argc, char* argv[])
 {
     gAppRunning.store(true);
 
-    TaskContainerInfo containerInfo {};
+    TaskContainerInfo containerInfo;
     containerInfo.maxSize = 64;
     // TODO: Here we could go crazy and reserve 1 main thread, 1 audio thread, 1 physics thread, and
     // TODO: dedicate what's left (std::thread::hardware_concurrency() - 3) for parallel task execution.
-    containerInfo.numParallelThreads = 1U;
+    containerInfo.numParallelThreads = 2U;
     TaskContainer container(containerInfo);
 
-    container.AddTimedTask(1s, { &parallel_sayhi, false });
-    container.AddTimedTask(2s, { &stop_running, true });
+    container.AddTimedTask(5s, { &parallel_sayhi, false });
+    container.AddTimedTask(10s, { &stop_running, true });
 
     while (gAppRunning.load())
     {
