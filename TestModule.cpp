@@ -66,17 +66,16 @@ class ParallelTaskRunner // not exported
 public:
     ParallelTaskRunner(const uint8_t numParallelThreads);
     ~ParallelTaskRunner();
-    void RunTasks();
-    void Notify() {}
     void Terminate();
     void RunTask(const TimedTaskInfo& taskInfo);
 
 private:
     void Runner();
     std::condition_variable mCV;
-    std::mutex mMutex;
-    std::thread mThread;
+    std::vector<std::thread> mThreads;
     std::atomic_bool mRunning;
+
+    std::mutex mMutex;
     std::queue<TimedTaskInfo> mQueue;
 };
 
@@ -160,19 +159,21 @@ ParallelTaskRunner::ParallelTaskRunner(const uint8_t numParallelThreads)
 {
     // TODO: Create a thread pool!
     mRunning.store(true);
-    mThread = std::thread([this]{ this->Runner(); });
+    for (uint8_t i = 0; i < numParallelThreads; i++)
+    {
+        mThreads.emplace_back([this]{ this->Runner(); });
+    }
 }
 
 ParallelTaskRunner::~ParallelTaskRunner()
 {
 }
 
-void ParallelTaskRunner::RunTasks()
-{
-}
-
 void ParallelTaskRunner::Terminate()
 {
+    mRunning.store(false);
+    mCV.notify_all();
+    // TODO: Join all threads?
 }
 
 void ParallelTaskRunner::RunTask(const TimedTaskInfo& taskInfo)
@@ -181,11 +182,16 @@ void ParallelTaskRunner::RunTask(const TimedTaskInfo& taskInfo)
 
     // NOTE: Very interesting scenario is having a thread pool, and then find an available thread!
     // This could be done by adding to a data structure (NOT a queue) and signal a(ny) thread
+
+    while (!mMutex.try_lock()) {} // TODO: Probably not the best, but should be ready momentarily!
+    mQueue.push(taskInfo); // we must copy it
+    mMutex.unlock();
+    mCV.notify_one();
 }
 
 void ParallelTaskRunner::Runner()
 {
-    std::cout << "TaskRunner::Runner()\n";
+    std::cout << "Spawning task thread " << std::this_thread::get_id() << "\n";
 
     while (mRunning.load())
     {
@@ -197,28 +203,19 @@ void ParallelTaskRunner::Runner()
             std::this_thread::sleep_for(std::chrono::milliseconds(50)); // something...
         }
 
-        // 2) lock mutex and dequeue
-        while (!mQueue.empty())
+        // 2) dequeue and execute
+        if (!mQueue.empty())
         {
             TimedTaskInfo timedTask = mQueue.front();
-            mQueue.
+            mQueue.pop();
+            mMutex.unlock();
+
+            timedTask.callback();
         }
 
-        // 3) unlock mutex and run all queued tasks
-
-        // 4) go to sleep on CV
-
-
-
-        std::unique_lock lk(mMutex);
+        // 3) go to sleep on CV
+        std::unique_lock lk(mMutex); // TODO: This won't work! I probably need several mutexes! (muticies? :))
         mCV.wait(lk);
-
-        // TODO: spurious wakeup guard
-
-        // TODO: do stuff
-
-        lk.unlock();
-        mCV.notify_one();
     }
 }
 
