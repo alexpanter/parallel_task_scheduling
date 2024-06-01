@@ -1,37 +1,37 @@
 import TestModule;
 
 #include <chrono>
-#include <functional>
 #include <iostream>
-#include <future>
-
-//using namespace std::chrono_literals;
-
-template<class Rep, class Period>
-std::future<void> TimerAsync(std::chrono::duration<Rep, Period> duration, const std::function<void()>& callback)
-{
-    return std::async(std::launch::async, [duration, callback]()
-    {
-        std::this_thread::sleep_for(duration);
-        callback();
-    });
-}
+#include <thread>
 
 // GLOBALS
 std::atomic_bool gAppRunning = true;
 
 void stop_running()
 {
+    std::cout << "[Thread=" << std::this_thread::get_id << "] stop_running()\n";
     gAppRunning.store(false);
+}
+
+void parallel_sayhi()
+{
+    std::cout << "[Thread=" << std::this_thread::get_id
+        << "] Hello there, I'm from a parallel universe!\n";
 }
 
 int main(int argc, char* argv[])
 {
     gAppRunning.store(true);
-    TaskContainer container;
 
-    TimedTaskInfo info { &stop_running, true };
-    container.AddTimedTask(5s, info);
+    TaskContainerInfo containerInfo {};
+    containerInfo.maxSize = 64;
+    // TODO: Here we could go crazy and reserve 1 main thread, 1 audio thread, 1 physics thread, and
+    // TODO: dedicate what's left (std::thread::hardware_concurrency() - 3) for parallel task execution.
+    containerInfo.numParallelThreads = 1U;
+    TaskContainer container(containerInfo);
+
+    container.AddTimedTask(1s, { &parallel_sayhi, false });
+    container.AddTimedTask(2s, { &stop_running, true });
 
     while (gAppRunning.load())
     {
@@ -41,8 +41,9 @@ int main(int argc, char* argv[])
 
         std::cout << "Processing...\n";
         std::this_thread::sleep_for(500ms); // work simulation
-
     }
+
+    container.Terminate();
 
     std::cout << "Finished.\n";
     return 0;
