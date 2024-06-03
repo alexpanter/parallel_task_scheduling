@@ -9,12 +9,13 @@ std::atomic_bool gAppRunning = true;
 
 void stop_running()
 {
-    std::cout << "[Thread=" << std::this_thread::get_id() << "] stop_running()\n";
+    std::cout << "Stop_running()\n";
     gAppRunning.store(false);
 }
 
 void parallel_sayhi()
 {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50)); // work simulation
     std::cout << "[Thread=" << std::this_thread::get_id()
         << "] Hello there, I'm from a parallel universe!\n";
 }
@@ -30,7 +31,7 @@ int main(int argc, char* argv[])
     containerInfo.numParallelThreads = 2U;
     TaskContainer container(containerInfo);
 
-    container.AddTimedTask(5s, { &parallel_sayhi, false });
+    for (int i = 0; i < 10; i++) { container.AddTimedTask(5s, { &parallel_sayhi, false }); }
     container.AddTimedTask(10s, { &stop_running, true });
 
     while (gAppRunning.load())
@@ -40,7 +41,7 @@ int main(int argc, char* argv[])
         // Process main thread queue here
 
         std::cout << "Processing...\n";
-        std::this_thread::sleep_for(500ms); // work simulation / frame limiter
+        std::this_thread::sleep_for(1000ms); // work simulation / frame limiter
     }
 
     container.Terminate();

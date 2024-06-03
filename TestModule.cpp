@@ -6,6 +6,7 @@
 #include <iostream>
 #include <mutex>
 #include <queue>
+#include <semaphore>
 #include <unordered_set>
 
 export module TestModule;
@@ -43,6 +44,7 @@ class LinkedListArray
     static_assert(Size < Constants16bit::Invalid);
 public:
     LinkedListArray();
+    ~LinkedListArray();
     bool Insert(const TaskWithTimer& elem);
     void ForEach(const std::function<bool(TaskWithTimer&)>& iterate); // iterate returns 'true' is element should be removed
     void PostIterate(); // cleanup any elements marked as so
@@ -74,8 +76,7 @@ private:
     std::condition_variable mCV;
     std::vector<std::thread> mThreads;
     std::atomic_bool mRunning;
-
-    std::mutex mMutex;
+    std::binary_semaphore mSem {1}; // ready!
     std::queue<TimedTaskInfo> mQueue;
 };
 
@@ -98,7 +99,7 @@ public:
 private:
     bool ForEachTask(TaskWithTimer& taskInfo);
     ParallelTaskRunner* mTaskRunner = nullptr;
-    LinkedListArray<64>* mTaskList; // space for max 64 tasks at any given time
+    LinkedListArray<64>* mTaskList = nullptr; // space for max 64 tasks at any given time
 
     std::chrono::time_point<std::chrono::system_clock> mTimer; // TODO: Different possibilities for template arg
     std::chrono::milliseconds mElapsed;
@@ -118,6 +119,14 @@ LinkedListArray<Size>::LinkedListArray()
     }
     mFreeCount = Size;
     mRemovalCount = 0U;
+}
+
+template <uint16_t Size>
+LinkedListArray<Size>::~LinkedListArray()
+{
+    mFreeCount = 0; // insertion will fail
+    mAllocated.clear(); // ForEach will have 0 iterations
+    mRemovalCount = 0U; // PostIterate will have 0 iterations
 }
 
 template <uint16_t Size>
@@ -173,46 +182,40 @@ void ParallelTaskRunner::Terminate()
 {
     mRunning.store(false);
     mCV.notify_all();
-    // TODO: Join all threads?
+    for (auto& t : mThreads) { t.join(); }
 }
 
 void ParallelTaskRunner::RunTask(const TimedTaskInfo& taskInfo)
 {
-    std::unique_lock lk(mMutex);
-    while (!lk.try_lock()) {} // TODO: Probably not the best, but should be ready momentarily!
+    mSem.acquire();
     mQueue.push(taskInfo); // we must copy it
-    lk.unlock();
+    mSem.release();
     mCV.notify_one();
 }
 
 void ParallelTaskRunner::Runner()
 {
     std::cout << "Spawning task thread " << std::this_thread::get_id() << "\n";
+    std::mutex local_mutex;
 
     while (mRunning.load())
     {
-        std::unique_lock lk(mMutex);
-        // 0) check if wakeup was spurious
-
-        // 1) check mutex state and possibly wait
-        if (!lk.try_lock())
+        std::unique_lock lk(local_mutex);
+        mSem.acquire();
+        if (mQueue.empty())
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // something...
+            mSem.release();
+            mCV.wait(lk); // spurious wakeups may also occur, but even then we still continue loop!
             continue;
         }
+        TimedTaskInfo timedTask = mQueue.front();
+        mQueue.pop();
+        mSem.release();
 
-        // 2) dequeue, relinquish lock, then execute
-        if (!mQueue.empty())
-        {
-            TimedTaskInfo timedTask = mQueue.front();
-            mQueue.pop();
-            lk.release();
-            timedTask.callback();
-        }
-
-        // 3) go to sleep on CV
-        mCV.wait(lk);
+        timedTask.callback();
     }
+
+    std::cout << "Ending task thread " << std::this_thread::get_id() << "\n";
 }
 
 
@@ -226,6 +229,7 @@ TaskContainer::TaskContainer(const TaskContainerInfo& info)
 
 TaskContainer::~TaskContainer()
 {
+    mTaskRunner->Terminate();
     delete mTaskRunner;
     delete mTaskList;
 }
