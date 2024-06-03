@@ -99,6 +99,8 @@ public:
     TaskScheduler(const TaskSchedulerInfo& info);
     ~TaskScheduler();
     void ProcessTasks();
+    // In my IDE templates on std::chrono::duration does not work across a module boundary!
+    void AddTimedTask(std::chrono::milliseconds duration, const TaskInfo& taskInfo);
     void AddTimedTask(std::chrono::seconds duration, const TaskInfo& taskInfo);
     void Terminate(bool finishTasks = false);
 
@@ -302,6 +304,16 @@ bool TaskScheduler::ForceRunEachTask(const TimedTaskInfo& timedTaskInfo)
         mParallelRunner->RunTask(timedTaskInfo.taskInfo);
     }
     return true;
+}
+
+void TaskScheduler::AddTimedTask(std::chrono::milliseconds duration, const TaskInfo& taskInfo)
+{
+    if (taskInfo.callback == nullptr)
+    {
+        std::cerr << "[TaskScheduler::AddTimedTask] callback is NULL!\n";
+        return;
+    }
+    mContainer->Insert({ taskInfo, duration });
 }
 
 void TaskScheduler::AddTimedTask(std::chrono::seconds duration, const TaskInfo& taskInfo)

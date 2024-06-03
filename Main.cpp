@@ -32,7 +32,7 @@ int main(int argc, char* argv[])
     TaskScheduler taskScheduler(info);
 
     for (int i = 0; i < 10; i++) { taskScheduler.AddTimedTask(5s, { &parallel_sayhi, false }); }
-    taskScheduler.AddTimedTask(10s, { &stop_running, true });
+    taskScheduler.AddTimedTask(10000ms, { &stop_running, true });
 
     while (gAppRunning.load())
     {
