@@ -6,4 +6,4 @@ This code creates a `TaskScheduler` with a convenient interface, which may deleg
 be executed after a specified time interval has passed. Intended for game engine programming, but can work under any
 scenario which requires such a system.
 
-Published under the MIT license (see `LICENSE.md`).
+Published under the MIT license (see `LICENSE`).
