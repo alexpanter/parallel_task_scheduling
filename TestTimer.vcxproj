@@ -112,7 +112,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalModuleDependencies>TaskContainerModule</AdditionalModuleDependencies>
+      <AdditionalModuleDependencies>TaskSchedulingModule</AdditionalModuleDependencies>
       <ScanSourceForModuleDependencies>true</ScanSourceForModuleDependencies>
       <EnableModules>true</EnableModules>
       <BuildStlModules>true</BuildStlModules>
@@ -161,11 +161,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="TestModule.cpp" />
-    <ClCompile Include="TestTimer.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="LinkedListArray.cpp" />
+    <ClCompile Include="TaskScheduling.cpp" />
+    <ClCompile Include="Main.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

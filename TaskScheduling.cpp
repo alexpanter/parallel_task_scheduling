@@ -9,7 +9,7 @@
 #include <semaphore>
 #include <unordered_set>
 
-export module TaskContainerModule;
+export module TaskSchedulingModule;
 
 export using namespace std::chrono_literals;
 
@@ -107,10 +107,10 @@ private:
     bool mParallelExecutionAllowed;
     bool ForEachTask(TimedTaskInfo& timedTaskInfo);
     bool ForceRunEachTask(const TimedTaskInfo& timedTaskInfo);
-    ParallelTaskRunner* mTaskRunner = nullptr;
-    TaskContainer* mTaskList = nullptr;
+    ParallelTaskRunner* mParallelRunner = nullptr;
+    TaskContainer* mContainer = nullptr;
 
-    std::chrono::time_point<std::chrono::system_clock> mTimer; // TODO: Different possibilities for template arg
+    std::chrono::time_point<std::chrono::steady_clock> mTimer;
     std::chrono::milliseconds mElapsed;
 };
 
@@ -237,30 +237,30 @@ TaskScheduler::TaskScheduler(const TaskSchedulerInfo& info)
     mParallelExecutionAllowed = info.numParallelThreads > 0U;
     if (mParallelExecutionAllowed)
     {
-        mTaskRunner = new ParallelTaskRunner(info.numParallelThreads);
+        mParallelRunner = new ParallelTaskRunner(info.numParallelThreads);
     }
-    mTaskList = new TaskContainer(info.maxSize);
-    mTimer = std::chrono::system_clock::now();
+    mContainer = new TaskContainer(info.maxSize);
+    mTimer = std::chrono::steady_clock::now();
     mElapsed = {};
 }
 
 TaskScheduler::~TaskScheduler()
 {
     mRunning = false;
-    if (mTaskRunner != nullptr)
+    if (mParallelRunner != nullptr)
     {
-        delete mTaskRunner;
+        delete mParallelRunner;
     }
-    delete mTaskList;
+    delete mContainer;
 }
 
 void TaskScheduler::ProcessTasks()
 {
-    auto now = std::chrono::system_clock::now();
+    auto now = std::chrono::steady_clock::now();
     mElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - mTimer);
 
-    mTaskList->ForEach(std::bind(&TaskScheduler::ForEachTask, this, std::placeholders::_1));
-    mTaskList->PostIterate();
+    mContainer->ForEach(std::bind(&TaskScheduler::ForEachTask, this, std::placeholders::_1));
+    mContainer->PostIterate();
 
     mTimer = now;
 }
@@ -281,7 +281,7 @@ bool TaskScheduler::ForEachTask(TimedTaskInfo& timedTaskInfo)
         }
         else
         {
-            mTaskRunner->RunTask(timedTaskInfo.taskInfo);
+            mParallelRunner->RunTask(timedTaskInfo.taskInfo);
         }
     }
     else
@@ -299,7 +299,7 @@ bool TaskScheduler::ForceRunEachTask(const TimedTaskInfo& timedTaskInfo)
     }
     else
     {
-        mTaskRunner->RunTask(timedTaskInfo.taskInfo);
+        mParallelRunner->RunTask(timedTaskInfo.taskInfo);
     }
     return true;
 }
@@ -311,20 +311,20 @@ void TaskScheduler::AddTimedTask(std::chrono::seconds duration, const TaskInfo& 
         std::cerr << "[TaskScheduler::AddTimedTask] callback is NULL!\n";
         return;
     }
-    mTaskList->Insert({ taskInfo, duration });
+    mContainer->Insert({ taskInfo, duration });
 }
 
 void TaskScheduler::Terminate(bool finishTasks)
 {
     if (finishTasks)
     {
-        mTaskList->ForEach(std::bind(&TaskScheduler::ForceRunEachTask, this, std::placeholders::_1));
-        mTaskList->PostIterate();
+        mContainer->ForEach(std::bind(&TaskScheduler::ForceRunEachTask, this, std::placeholders::_1));
+        mContainer->PostIterate();
     }
 
-    if (mTaskRunner != nullptr)
+    if (mParallelRunner != nullptr)
     {
-        mTaskRunner->Terminate();
+        mParallelRunner->Terminate();
     }
     mRunning = false;
 }
